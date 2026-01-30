@@ -1,5 +1,8 @@
 # SAML Response Diff
-SAML Response Diff is a lightweight, client-side web application designed to help developers and identity engineers compare and analyze SAML Assertions or Responses. It provides a side-by-side comparison of key fields and an interactive XML explorer.
+
+SAML Response Diff is a lightweight, client-side web application designed to help developers and identity engineers compare and analyze SAML Assertions (responses sent to SP). It provides a side-by-side comparison of key fields and an interactive XML explorer.
+
+[https://trustbuilder.github.io/saml-response-diff](https://trustbuilder.github.io/saml-response-diff/)
 
 ## 🚀 Key Features
 
@@ -12,11 +15,12 @@ SAML Response Diff is a lightweight, client-side web application designed to hel
 
 ## 🛠️ How to Use
 
-1. Open the App: Open index.html in any modern web browser.
+1. Open the App: Open [https://trustbuilder.github.io/saml-response-diff](https://trustbuilder.github.io/saml-response-diff/) in any modern web browser.
 
 2. Input Data:
-   - Paste your first SAML XML into the left box.
-   - Paste your second SAML XML into the right box.
+   - Paste your first SAML XML Response into the left box.
+   - Paste your second SAML XML Response into the right box.
+   - Optionaly change the default names "SAML Assertion A" and "SAML Assertion B".
 
 3. Compare: Click the "Compare" button.
 
