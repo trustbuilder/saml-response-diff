@@ -15,15 +15,18 @@ SAML Response Diff is a lightweight, client-side web application designed to hel
 
 ## 🛠️ How to Use
 
-1. Open the App: Open [https://trustbuilder.github.io/saml-response-diff](https://trustbuilder.github.io/saml-response-diff/) in any modern web browser.
+1. **Paste your first SAML XML Response into the left box.**
 
-2. Input Data:
-   - Paste your first SAML XML Response into the left box.
-   - Paste your second SAML XML Response into the right box.
-   - Optionaly change the default names "SAML Assertion A" and "SAML Assertion B".
+2. **Paste your second SAML XML Response into the right box.**
 
-3. Compare: Click the "Compare" button.
+Optionaly change the default names "SAML Assertion A" and "SAML Assertion B".
 
-4. Analyze:
+3. **Click the "Compare" button.**
+
+4. **Switch between both mode**
    - Use "Field View" to see extracted data and highlighted differences.
    - Use "XML View" to explore the raw structures side-by-side.
+
+
+<img width="1920" height="1613" alt="SAMLResponseDiff-steps" src="https://github.com/user-attachments/assets/cb9a1ed9-3222-47c4-8b72-49e0d859205d" />
+
