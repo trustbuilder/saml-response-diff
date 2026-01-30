@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAML Response Diff</title>
+    <!-- Dependances via CDN pour une execution directe dans le navigateur -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Custom scrollbar for better look in dark mode areas */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        /**
+         * Generic Icon component using Lucide CDN
+         */
+        const Icon = ({ name, size = 16, className = "" }) => {
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [name]);
+            
+            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+        };
+
+        /**
+         * Recursive component to display an interactive XML branch
+         */
+        const XMLBranch = ({ node }) => {
+            const [isOpen, setIsOpen] = useState(true);
+
+            // Ignore empty text nodes
+            if (node.nodeType === 3) { // Node.TEXT_NODE
+                const text = node.textContent.trim();
+                if (!text) return null;
+                return <span className="text-slate-300 ml-4 py-0.5 block">{text}</span>;
+            }
+
+            // Handle element nodes
+            if (node.nodeType === 1) { // Node.ELEMENT_NODE
+                const hasChildren = Array.from(node.childNodes).some(child => 
+                    child.nodeType === 1 || (child.nodeType === 3 && child.textContent.trim())
+                );
+                const attributes = Array.from(node.attributes);
+
+                return (
+                    <div className="ml-4 font-mono text-[11px] leading-tight">
+                        <div className="flex items-start group">
+                            {hasChildren ? (
+                                <button 
+                                    onClick={() => setIsOpen(!isOpen)} 
+                                    className="mt-0.5 mr-1 text-slate-500 hover:text-white transition-colors"
+                                >
+                                    <Icon name={isOpen ? "chevron-down" : "chevron-right"} size={12} />
+                                </button>
+                            ) : (
+                                <div className="w-4" />
+                            )}
+                            
+                            <div className="flex flex-wrap items-center">
+                                <span className="text-pink-400">&lt;{node.tagName}</span>
+                                {attributes.map((attr, idx) => (
+                                    <span key={idx} className="ml-2">
+                                        <span className="text-orange-300">{attr.name}</span>
+                                        <span className="text-slate-400">=</span>
+                                        <span className="text-emerald-400">"{attr.value}"</span>
+                                    </span>
+                                ))}
+                                <span className="text-pink-400">&gt;</span>
+                                
+                                {!isOpen && hasChildren && (
+                                    <span 
+                                        className="text-slate-500 bg-slate-800 px-1 rounded ml-1 cursor-pointer" 
+                                        onClick={() => setIsOpen(true)}
+                                    >...</span>
+                                )}
+                            </div>
+                        </div>
+
+                        {isOpen && (
+                            <div className="border-l border-slate-800 ml-1.5 pl-1">
+                                {Array.from(node.childNodes).map((child, i) => (
+                                    <XMLBranch key={i} node={child} />
+                                ))}
+                            </div>
+                        )}
+
+                        {isOpen && hasChildren && (
+                            <div className="flex items-center ml-4">
+                                <span className="text-pink-400">&lt;/{node.tagName}&gt;</span>
+                            </div>
+                        )}
+                        
+                        {!hasChildren && (
+                            <span className="text-pink-400 ml-[-4px]">&lt;/{node.tagName}&gt;</span>
+                        )}
+                    </div>
+                );
+            }
+
+            return null;
+        };
+
+        const App = () => {
+            const [samlA, setSamlA] = useState('');
+            const [samlB, setSamlB] = useState('');
+            const [nameA, setNameA] = useState('SAML Assertion A');
+            const [nameB, setNameB] = useState('SAML Assertion B');
+            const [viewMode, setViewMode] = useState('fields'); 
+            const [analysis, setAnalysis] = useState(null);
+            const [error, setError] = useState(null);
+
+            const parseSAML = (xmlString) => {
+                try {
+                    const parser = new DOMParser();
+                    const xmlDoc = parser.parseFromString(xmlString, "text/xml");
+                    
+                    if (xmlDoc.getElementsByTagName("parsererror").length > 0) {
+                        throw new Error("Invalid XML format");
+                    }
+
+                    const findValue = (localName) => {
+                        const nodes = xmlDoc.getElementsByTagNameNS("*", localName);
+                        return nodes.length > 0 ? nodes[0].textContent : null;
+                    };
+
+                    const findAttr = (parentLocalNames, attrName) => {
+                        for (const name of parentLocalNames) {
+                            const nodes = xmlDoc.getElementsByTagNameNS("*", name);
+                            for (const node of nodes) {
+                                if (node.hasAttribute(attrName)) return node.getAttribute(attrName);
+                            }
+                        }
+                        return null;
+                    };
+
+                    const attributes = {};
+                    const attrNodes = Array.from(xmlDoc.getElementsByTagNameNS("*", "Attribute"));
+                    
+                    attrNodes.forEach(node => {
+                        const name = node.getAttribute("Name") || node.getAttribute("FriendlyName");
+                        const valNodes = node.getElementsByTagNameNS("*", "AttributeValue");
+                        const value = valNodes.length > 0 ? valNodes[0].textContent : "";
+                        if (name) attributes[name] = value;
+                    });
+
+                    return {
+                        issuer: findValue("Issuer") || "Not found",
+                        subject: findValue("NameID") || findValue("Subject") || "Not found",
+                        audience: findValue("Audience") || "Not found",
+                        issueInstant: findAttr(["Response", "Assertion"], "IssueInstant") || "N/A",
+                        destination: findAttr(["Response"], "Destination") || "N/A",
+                        attributes: attributes,
+                        hasSignature: xmlDoc.getElementsByTagNameNS("*", "Signature").length > 0,
+                        dom: xmlDoc.documentElement 
+                    };
+                } catch (e) {
+                    console.error("Parsing error:", e);
+                    return null;
+                }
+            };
+
+            const handleCompare = () => {
+                setError(null);
+                if (!samlA.trim() || !samlB.trim()) {
+                    setError("Please provide two SAML assertions to compare.");
+                    return;
+                }
+
+                const dataA = parseSAML(samlA);
+                const dataB = parseSAML(samlB);
+
+                if (!dataA || !dataB) {
+                    setError("Error while parsing XML. Ensure the content is valid SAML XML.");
+                    return;
+                }
+
+                setAnalysis({ a: dataA, b: dataB });
+            };
+
+            const clearInputs = () => {
+                setSamlA('');
+                setSamlB('');
+                setAnalysis(null);
+                setError(null);
+            };
+
+            const DiffRow = ({ label, valA, valB }) => {
+                const safeString = (v) => {
+                    if (v === null || v === undefined) return "";
+                    return typeof v === 'object' ? JSON.stringify(v) : String(v);
+                };
+
+                const isDifferent = safeString(valA) !== safeString(valB);
+                
+                const renderValue = (val) => {
+                    if (val === undefined || val === null || val === "" || val === "Not found" || val === "N/A") {
+                        return <span className="text-red-400 italic">Not found</span>;
+                    }
+                    return val;
+                };
+
+                return (
+                    <div className={`grid grid-cols-1 md:grid-cols-3 gap-4 p-4 border-b border-gray-100 ${isDifferent ? 'bg-amber-50' : 'hover:bg-gray-50'}`}>
+                        <div className="font-semibold text-gray-700 flex items-center gap-2">
+                            <Icon 
+                                name={isDifferent ? "alert-circle" : "check-circle-2"} 
+                                size={16} 
+                                className={isDifferent ? "text-amber-500" : "text-green-500"} 
+                            />
+                            {label}
+                        </div>
+                        <div className="text-sm break-all font-mono bg-white p-2 rounded border border-gray-200 shadow-sm">
+                            {renderValue(valA)}
+                        </div>
+                        <div className="text-sm break-all font-mono bg-white p-2 rounded border border-gray-200 shadow-sm">
+                            {renderValue(valB)}
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-gray-900">
+                    <div className="max-w-7xl mx-auto">
+                        <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <h1 className="text-3xl font-bold text-indigo-900 flex items-center gap-3">
+                                    <Icon name="file-diff" size={32} className="text-indigo-600" />
+                                    SAML Response Diff
+                                </h1>
+                                <p className="text-slate-600 mt-1">Interactive XML assertion explorer.</p>
+                            </div>
+                            <div className="flex gap-2">
+                                <button 
+                                    onClick={clearInputs}
+                                    className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors flex items-center gap-2"
+                                >
+                                    <Icon name="trash-2" />
+                                    Clear
+                                </button>
+                                <button 
+                                    onClick={handleCompare}
+                                    className="px-6 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 shadow-md transition-all flex items-center gap-2"
+                                >
+                                    <Icon name="search" />
+                                    Compare
+                                </button>
+                            </div>
+                        </header>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                            <div className="space-y-3">
+                                <div className="flex items-center gap-2 px-1">
+                                    <Icon name="edit-2" size={14} className="text-slate-400" />
+                                    <input 
+                                        type="text" 
+                                        value={nameA} 
+                                        onChange={(e) => setNameA(e.target.value)}
+                                        className="bg-transparent border-b border-dashed border-slate-300 focus:border-indigo-500 outline-none text-sm font-bold text-gray-700 uppercase tracking-wider w-full py-1"
+                                        placeholder="Name assertion A"
+                                    />
+                                </div>
+                                <textarea
+                                    className="w-full h-64 p-4 font-mono text-xs bg-white border border-slate-300 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                                    placeholder={`Paste XML for ${nameA}...`}
+                                    value={samlA}
+                                    onChange={(e) => setSamlA(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="space-y-3">
+                                <div className="flex items-center gap-2 px-1">
+                                    <Icon name="edit-2" size={14} className="text-slate-400" />
+                                    <input 
+                                        type="text" 
+                                        value={nameB} 
+                                        onChange={(e) => setNameB(e.target.value)}
+                                        className="bg-transparent border-b border-dashed border-slate-300 focus:border-indigo-500 outline-none text-sm font-bold text-gray-700 uppercase tracking-wider w-full py-1"
+                                        placeholder="Name assertion B"
+                                    />
+                                </div>
+                                <textarea
+                                    className="w-full h-64 p-4 font-mono text-xs bg-white border border-slate-300 rounded-xl shadow-inner focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                                    placeholder={`Paste XML for ${nameB}...`}
+                                    value={samlB}
+                                    onChange={(e) => setSamlB(e.target.value)}
+                                />
+                            </div>
+                        </div>
+
+                        {error && (
+                            <div className="mb-8 p-4 bg-red-50 border-l-4 border-red-500 text-red-700 rounded-r-lg flex items-center gap-3">
+                                <Icon name="alert-circle" />
+                                {error}
+                            </div>
+                        )}
+
+                        {analysis && (
+                            <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-200">
+                                <div className="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+                                    <div className="flex bg-white rounded-lg p-1 border border-gray-200">
+                                        <button 
+                                            onClick={() => setViewMode('fields')}
+                                            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${viewMode === 'fields' ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}
+                                        >
+                                            <Icon name="layout-list" />
+                                            Field View
+                                        </button>
+                                        <button 
+                                            onClick={() => setViewMode('raw')}
+                                            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${viewMode === 'raw' ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}
+                                        >
+                                            <Icon name="code" />
+                                            XML View
+                                        </button>
+                                    </div>
+                                    <div className="hidden sm:block text-xs text-slate-500">
+                                        Comparing <span className="font-bold">{nameA}</span> with <span className="font-bold">{nameB}</span>
+                                    </div>
+                                </div>
+
+                                {viewMode === 'fields' ? (
+                                    <div className="divide-y divide-gray-100">
+                                        <div className="grid grid-cols-3 gap-4 p-4 bg-gray-50 text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-200">
+                                            <div>Property</div>
+                                            <div className="truncate">{nameA}</div>
+                                            <div className="truncate">{nameB}</div>
+                                        </div>
+                                        <DiffRow label="Issuer" valA={analysis.a.issuer} valB={analysis.b.issuer} />
+                                        <DiffRow label="Subject (NameID)" valA={analysis.a.subject} valB={analysis.b.subject} />
+                                        <DiffRow label="Audience" valA={analysis.a.audience} valB={analysis.b.audience} />
+                                        <DiffRow label="Issue Instant" valA={analysis.a.issueInstant} valB={analysis.b.issueInstant} />
+                                        <DiffRow label="Destination" valA={analysis.a.destination} valB={analysis.b.destination} />
+                                        <DiffRow label="Signature Present" valA={analysis.a.hasSignature ? "Yes" : "No"} valB={analysis.b.hasSignature ? "Yes" : "No"} />
+                                        
+                                        <div className="p-4 bg-indigo-50/30 font-bold text-indigo-900 text-sm uppercase">
+                                            Detected Attributes
+                                        </div>
+                                        
+                                        {Array.from(new Set([...Object.keys(analysis.a.attributes), ...Object.keys(analysis.b.attributes)])).sort().map(key => (
+                                            <DiffRow 
+                                                key={key}
+                                                label={key} 
+                                                valA={analysis.a.attributes[key]} 
+                                                valB={analysis.b.attributes[key]} 
+                                            />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 divide-x divide-slate-800 bg-slate-900 min-h-[500px]">
+                                        <div className="p-4 overflow-auto max-h-[700px] custom-scrollbar">
+                                            <div className="mb-4 pb-2 border-b border-slate-800 flex justify-between items-center">
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase truncate">{nameA}</span>
+                                            </div>
+                                            <XMLBranch node={analysis.a.dom} />
+                                        </div>
+                                        <div className="p-4 overflow-auto max-h-[700px] custom-scrollbar">
+                                            <div className="mb-4 pb-2 border-b border-slate-800 flex justify-between items-center">
+                                                <span className="text-[10px] text-slate-400 font-bold uppercase truncate">{nameB}</span>
+                                            </div>
+                                            <XMLBranch node={analysis.b.dom} />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {!analysis && !error && (
+                            <div className="flex flex-col items-center justify-center py-20 text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl bg-white/50">
+                                <Icon name="file-diff" size={48} className="text-slate-300 mb-4" />
+                                <p className="text-lg font-medium">Ready for analysis</p>
+                                <p className="text-sm">Paste your XML files to explore and compare structures.</p>
+                            </div>
+                        )}
+                    </div>
+
+                    <footer className="mt-12 text-center text-slate-400 text-sm">
+                        SAML 2.0 Diagnostic Tool • Client-side processing only
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
